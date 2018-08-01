@@ -1,0 +1,61 @@
+!/bin/bash
+
+# list of the repositories which have the commit validator enabled
+HOOK_REPOS=('REPO1' 'REPO2' 'REPO3' 'REPO4' 'REPO5' 'REPO6' 'REPO7' 'REPO8' 'REPO9' 'REPO10')
+
+# example on how to enabled commit validator on specific branches of a repository. PLEASE NOTE THIS IS ONLY REQUIRED FOR BRANCHES WHICH ARE OUTSIDE THE RANGE OF THE REGULAR EXPRESSION FROM "branch_regex" VARIABLE. THE BRANCHES MATCHING THIS REGULAR EXPRESSION ARE ENFORCED BY THE COMMIT VALIDATOR BY DEFAULT.
+# REPO1_HOOK_BRANCHES="development,master"
+
+# environment variables of the hook
+project=$2
+refname=$4
+oldrev=$8
+newrev=${10}
+
+# subroutine for the commit validator functionality
+commit_validator () {
+ # grab the commit which is about to be pushed
+ missed_revs=$(git rev-list $oldrev..$newrev)
+ for rev in $missed_revs; do
+         # get the message of the commit which is about to be pushed
+         message="$(git cat-file commit $rev | sed '1,/^$/d')"
+         # compare commit message against regular expresion
+         if ! [[ $message =~ $regex ]];
+         then
+                 # error message with suggested formats in case of failure
+                 echo "Your commit message does not have the right format
+                       You should use one of the following formats:
+                       - WorkItem:<workitemId> <commit_message>
+                       - PROJ1-<jiraId> <commit_message>
+                       Automatic commit message for Merges and Reverts are allowed."
+                 exit 1
+         fi
+ done
+}
+
+# regular expression for enforcing which branches to be restricted from the branch list provided from a repository
+branch_regex='(^development$|^feature\/.*-development$|^release\/.*$)'
+# regular expression for commit message format
+regex='(^(WorkItem:|PROJ1-)[0-9].*)|(^Merge.*|^Revert.*)'
+# prefix to be removed from the branch name
+prefix="refs/heads/"
+# branch name
+refname="${refname//$prefix}"
+
+# check if the repository has been pushed to is part of the HOOK_REPOS list provided at the top
+if echo ${HOOK_REPOS[@]} | grep -wq "${project}"; then
+        # check if branch restriction has been enabled for the commit validator
+        if [[ -v "${project}_HOOK_BRANCHES" ]]; then
+                # get the string containing the branches to be restricted
+                HOOK_BRANCHES_STRING="${project}_HOOK_BRANCHES"
+                # split string of branches in array with elements using the "," as separator
+                HOOK_BRANCHES_ARRAY=$(echo ${!HOOK_BRANCHES_STRING} | tr "," "\n")
+                # check if the branch the commit has been pushed to is part of the list of restricted branches.
+                if echo ${HOOK_BRANCHES_ARRAY[@]} | grep -wq "${refname}"; then
+                        commit_validator
+                fi
+        # by default the branches from any of the repositories from the list at the top that match the regular expression for branches get the commit validator enabled.
+        elif [[ ${refname} =~ $branch_regex  ]]; then
+                commit_validator
+        fi
+fi
